@@ -1,6 +1,7 @@
 package fetch
 
 import (
+	"bytes"
 	"compress/flate"
 	"compress/gzip"
 	"encoding/json"
@@ -27,12 +28,30 @@ func RegisterDecodeFunc(ct string, fn func(io.Reader) error) {
 	decoders[ct] = fn
 }
 
-func Get(url string, value interface{}) error {
-	res, err := http.DefaultClient.Get(url)
+func Get(url string, out interface{}) error {
+	res, err := http.Get(url)
 	if err != nil {
 		return err
 	}
-	return decodeResponse(res, value)
+	return decodeResponse(res, out)
+}
+
+func PostJSON(url string, in, out interface{}) error {
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(in); err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, url, &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("content-type", ctjson)
+	req.Header.Set("accept", ctjson)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	return decodeResponse(res, out)
 }
 
 func decodeResponse(res *http.Response, value interface{}) error {
@@ -48,12 +67,15 @@ func decodeResponse(res *http.Response, value interface{}) error {
 		return nil
 	}
 
-	var body io.Reader
+	var (
+		body io.Reader
+		err  error
+	)
 	switch res.Header.Get("content-encoding") {
 	case encgzip:
 		body, err = gzip.NewReader(res.Body)
 	case encflate:
-		body, err = flate.NewReader(res.Body)
+		body = flate.NewReader(res.Body)
 	default:
 		body = res.Body
 	}
@@ -95,7 +117,7 @@ func (e Error) JSON(value interface{}) error {
 }
 
 func (e Error) XML(value interface{}) error {
-	return xml.Unmarshal(value)
+	return xml.Unmarshal(e.Payload, value)
 }
 
 func (e Error) Error() string {
