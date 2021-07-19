@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 )
 
@@ -55,7 +54,7 @@ func PatchJSON(url string, in, out interface{}) error {
 
 func doJSON(meth, url string, in, out interface{}) error {
 	var body bytes.Buffer
-	if err := json.NewEncoder(io.MultiWriter(&body, os.Stdout)).Encode(in); err != nil {
+	if err := json.NewEncoder(&body).Encode(in); err != nil {
 		return err
 	}
 	req, err := http.NewRequest(meth, url, &body)
