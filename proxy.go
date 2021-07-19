@@ -27,7 +27,7 @@ func proxy(w http.ResponseWriter, r *http.Request) {
 		RawQuery: r.URL.RawQuery,
 		Fragment: r.URL.Fragment,
 	}
-	req, err := http.NewRequest(r.Method, u, r.Body)
+	req, err := http.NewRequest(r.Method, u.String(), r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return

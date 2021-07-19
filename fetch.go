@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -22,62 +23,42 @@ const (
 	ctjson = "application/json"
 )
 
-var decoders = make(map[string]func(io.Reader) error)
+type DoFunc func(string, io.Reader) error
 
-func RegisterDecodeFunc(ct string, fn func(io.Reader) error) {
+type DecodeFunc func(io.Reader, string, interface{}) error
+
+var decoders = make(map[string]DecodeFunc)
+
+func RegisterDecodeFunc(ct string, fn DecodeFunc) {
 	decoders[ct] = fn
 }
 
 func Get(url string, out interface{}) error {
-	res, err := http.Get(url)
-	if err != nil {
-		return err
-	}
-	return decodeResponse(res, out)
+	return doGet(url, decodeBody(out))
 }
 
-func GetWith(url string, do func(r io.Reader) error) error {
-	res, err := http.Get(url)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode > +http.StatusBadRequest {
-		e := makeError(res.Status, res.StatusCode)
-		e.Payload, _ = io.ReadAll(res.Body)
-		return e
-	}
-
-	if res.StatusCode == http.StatusNoContent {
-		return nil
-	}
-
-	var body io.Reader
-	switch res.Header.Get("content-encoding") {
-	case encgzip:
-		body, err = gzip.NewReader(res.Body)
-	case encflate:
-		body = flate.NewReader(res.Body)
-	default:
-		body = res.Body
-	}
-	if err != nil {
-		return err
-	}
-	if c, ok := body.(io.Closer); ok {
-		defer c.Close()
-	}
-
-	return do(body)
+func GetWith(url string, do DoFunc) error {
+	return doGet(url, do)
 }
 
 func PostJSON(url string, in, out interface{}) error {
+	return doJSON(http.MethodPost, url, in, out)
+}
+
+func PutJSON(url string, in, out interface{}) error {
+	return doJSON(http.MethodPut, url, in, out)
+}
+
+func PatchJSON(url string, in, out interface{}) error {
+	return doJSON(http.MethodPatch, url, in, out)
+}
+
+func doJSON(meth, url string, in, out interface{}) error {
 	var body bytes.Buffer
-	if err := json.NewEncoder(&body).Encode(in); err != nil {
+	if err := json.NewEncoder(io.MultiWriter(&body, os.Stdout)).Encode(in); err != nil {
 		return err
 	}
-	req, err := http.NewRequest(http.MethodPost, url, &body)
+	req, err := http.NewRequest(meth, url, &body)
 	if err != nil {
 		return err
 	}
@@ -87,15 +68,24 @@ func PostJSON(url string, in, out interface{}) error {
 	if err != nil {
 		return err
 	}
-	return decodeResponse(res, out)
+	return decodeResponse(res, decodeBody(out))
 }
 
-func decodeResponse(res *http.Response, value interface{}) error {
+func doGet(url string, do DoFunc) error {
+	res, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	return decodeResponse(res, do)
+}
+
+func decodeResponse(res *http.Response, do DoFunc) error {
 	defer res.Body.Close()
 
-	if res.StatusCode > +http.StatusBadRequest {
+	if res.StatusCode >= http.StatusBadRequest {
 		e := makeError(res.Status, res.StatusCode)
 		e.Payload, _ = io.ReadAll(res.Body)
+		fmt.Println(string(e.Payload))
 		return e
 	}
 
@@ -121,18 +111,25 @@ func decodeResponse(res *http.Response, value interface{}) error {
 	if c, ok := body.(io.Closer); ok {
 		defer c.Close()
 	}
-	switch ct := res.Header.Get("content-type"); {
-	case strings.HasPrefix(ct, ctjson):
-		err = json.NewDecoder(body).Decode(value)
-	case strings.HasPrefix(ct, ctxml):
-		err = xml.NewDecoder(body).Decode(value)
-	default:
-		fn, ok := decoders[ct]
-		if ok {
-			err = fn(body)
+	return do(res.Header.Get("content-type"), body)
+}
+
+func decodeBody(out interface{}) DoFunc {
+	return func(ct string, r io.Reader) error {
+		var err error
+		switch {
+		case strings.HasPrefix(ct, ctjson):
+			err = json.NewDecoder(r).Decode(out)
+		case strings.HasPrefix(ct, ctxml):
+			err = xml.NewDecoder(r).Decode(out)
+		default:
+			fn, ok := decoders[ct]
+			if ok {
+				err = fn(r, ct, out)
+			}
 		}
+		return err
 	}
-	return err
 }
 
 type Error struct {
