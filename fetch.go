@@ -84,7 +84,6 @@ func decodeResponse(res *http.Response, do DoFunc) error {
 	if res.StatusCode >= http.StatusBadRequest {
 		e := makeError(res.Status, res.StatusCode)
 		e.Payload, _ = io.ReadAll(res.Body)
-		fmt.Println(string(e.Payload))
 		return e
 	}
 
