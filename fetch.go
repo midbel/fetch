@@ -76,13 +76,7 @@ func doJSON(meth, url string, in, out interface{}) error {
 	if err := json.NewEncoder(&body).Encode(in); err != nil {
 		return err
 	}
-	req, err := http.NewRequest(meth, url, &body)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("content-type", ctjson)
-	req.Header.Set("accept", ctjson)
-	res, err := client.Do(req)
+	res, err := execute(meth, url, jsonBody(&body))
 	if err != nil {
 		return err
 	}
@@ -90,11 +84,27 @@ func doJSON(meth, url string, in, out interface{}) error {
 }
 
 func doGet(url string, do DoFunc) error {
-	res, err := client.Get(url)
+	res, err := execute(http.MethodGet, url, emptyBody())
 	if err != nil {
 		return err
 	}
 	return decodeResponse(res, do)
+}
+
+func execute(meth, url string, bd body) (*http.Response, error) {
+	req, err := http.NewRequest(meth, url, bd.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if bd.Type != "" {
+		req.Header.Set("content-type", bd.Type)
+	}
+	req.Header.Add("accept-encoding", encgzip)
+	req.Header.Add("accept-encoding", encflate)
+	req.Header.Add("accept", ctjson)
+	req.Header.Add("accept", ctxml)
+
+	return client.Do(req)
 }
 
 func decodeResponse(res *http.Response, do DoFunc) error {
@@ -172,4 +182,28 @@ func (e Error) XML(value interface{}) error {
 
 func (e Error) Error() string {
 	return fmt.Sprintf("%s (%d)", e.Status, e.Code)
+}
+
+type body struct {
+	io.Reader
+	Type string
+}
+
+func emptyBody() body {
+	return body{}
+}
+
+func jsonBody(r io.Reader) body {
+	return makeBody(ctjson, r)
+}
+
+func xmlBody(r io.Reader) body {
+	return makeBody(ctxml, r)
+}
+
+func makeBody(ct string, r io.Reader) body {
+	return body{
+		Type:   ct,
+		Reader: r,
+	}
 }
