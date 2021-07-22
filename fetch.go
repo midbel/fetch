@@ -8,8 +8,10 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
@@ -52,6 +54,23 @@ func PatchJSON(url string, in, out interface{}) error {
 	return doJSON(http.MethodPatch, url, in, out)
 }
 
+func WithTimeout(wait time.Duration) {
+	if wait < 0 {
+		return
+	}
+	client.Timeout = wait
+}
+
+var client = http.Client{
+	Timeout: 5 * time.Second,
+	Transport: &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout: 2500 * time.Millisecond,
+		}).DialContext,
+		TLSHandshakeTimeout: 2500 * time.Millisecond,
+	},
+}
+
 func doJSON(meth, url string, in, out interface{}) error {
 	var body bytes.Buffer
 	if err := json.NewEncoder(&body).Encode(in); err != nil {
@@ -63,7 +82,7 @@ func doJSON(meth, url string, in, out interface{}) error {
 	}
 	req.Header.Set("content-type", ctjson)
 	req.Header.Set("accept", ctjson)
-	res, err := http.DefaultClient.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -71,7 +90,7 @@ func doJSON(meth, url string, in, out interface{}) error {
 }
 
 func doGet(url string, do DoFunc) error {
-	res, err := http.Get(url)
+	res, err := client.Get(url)
 	if err != nil {
 		return err
 	}
