@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"flag"
@@ -77,13 +78,21 @@ type Builder struct {
 func (b Builder) Build(url string) (*http.Request, error) {
 	var r io.Reader
 	if strings.HasPrefix(b.Body, "@") {
-		f, err := os.Open((b.Body)[1:])
+		buf, err := os.ReadFile(b.Body[1:])
 		if err != nil {
 			return nil, err
 		}
-		defer f.Close()
-
-		r = f
+		// f, err := os.Open((b.Body)[1:])
+		// if err != nil {
+		// 	return nil, err
+		// }
+		// defer f.Close()
+		//
+		// var buf  bytes.Buffer
+		// if err != nil {
+		// 	return nil, err
+		// }
+		r = bytes.NewReader(buf)
 	} else {
 		r = strings.NewReader(b.Body)
 	}
