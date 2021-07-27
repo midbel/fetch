@@ -76,10 +76,7 @@ func Follow(url string, rel RelType, do DoFunc) error {
 		}
 		links, _ := ParseLink(hs.Get("Link"))
 		for _, k := range links {
-			if !rel.follow(k.Rel) {
-				continue
-			}
-			if _, ok := seen[k.URL]; ok {
+			if _, ok := seen[k.URL]; ok || !rel.follow(k.Rel) {
 				continue
 			}
 			seen[k.URL] = struct{}{}
