@@ -42,6 +42,54 @@ func GetWith(url string, do DoFunc) error {
 	return doGet(url, do)
 }
 
+type RelType byte
+
+const (
+	RelPrev = 1 << iota
+	RelNext
+	RelBoth
+)
+
+func (r RelType) follow(str string) bool {
+	switch r {
+	case RelPrev:
+		return str == "prev"
+	case RelNext:
+		return str == "next"
+	case RelBoth:
+		return str == "prev" || str == "next"
+	default:
+		return false
+	}
+}
+
+func Follow(url string, rel RelType, do DoFunc) error {
+	var (
+		list []string
+		seen = make(map[string]struct{})
+	)
+	list = append(list, url)
+	for len(list) > 0 {
+		hs, err := doGetWithHeader(list[0], do)
+		if err != nil {
+			return err
+		}
+		links, _ := ParseLink(hs.Get("Link"))
+		for _, k := range links {
+			if !rel.follow(k.Rel) {
+				continue
+			}
+			if _, ok := seen[k.URL]; ok {
+				continue
+			}
+			seen[k.URL] = struct{}{}
+			list = append(list, k.URL)
+		}
+		list = list[1:]
+	}
+	return nil
+}
+
 func PostJSON(url string, in, out interface{}) error {
 	return doJSON(http.MethodPost, url, in, out)
 }
@@ -91,6 +139,14 @@ func doGet(url string, do DoFunc) error {
 	return decodeResponse(res, do)
 }
 
+func doGetWithHeader(url string, do DoFunc) (http.Header, error) {
+	res, err := execute(http.MethodGet, url, emptyBody())
+	if err != nil {
+		return nil, err
+	}
+	return decodeResponseWithHeader(res, do)
+}
+
 func execute(meth, url string, bd body) (*http.Response, error) {
 	req, err := http.NewRequest(meth, url, bd.Reader)
 	if err != nil {
@@ -107,17 +163,17 @@ func execute(meth, url string, bd body) (*http.Response, error) {
 	return client.Do(req)
 }
 
-func decodeResponse(res *http.Response, do DoFunc) error {
+func decodeResponseWithHeader(res *http.Response, do DoFunc) (http.Header, error) {
 	defer res.Body.Close()
 
 	if res.StatusCode >= http.StatusBadRequest {
 		e := makeError(res.Status, res.StatusCode)
 		e.Payload, _ = io.ReadAll(res.Body)
-		return e
+		return nil, e
 	}
 
 	if res.StatusCode == http.StatusNoContent {
-		return nil
+		return res.Header, nil
 	}
 
 	var (
@@ -133,12 +189,17 @@ func decodeResponse(res *http.Response, do DoFunc) error {
 		body = res.Body
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if c, ok := body.(io.Closer); ok {
 		defer c.Close()
 	}
-	return do(res.Header.Get("content-type"), body)
+	return res.Header, do(res.Header.Get("content-type"), body)
+}
+
+func decodeResponse(res *http.Response, do DoFunc) error {
+	_, err := decodeResponseWithHeader(res, do)
+	return err
 }
 
 func decodeBody(out interface{}) DoFunc {

@@ -82,16 +82,6 @@ func (b Builder) Build(url string) (*http.Request, error) {
 		if err != nil {
 			return nil, err
 		}
-		// f, err := os.Open((b.Body)[1:])
-		// if err != nil {
-		// 	return nil, err
-		// }
-		// defer f.Close()
-		//
-		// var buf  bytes.Buffer
-		// if err != nil {
-		// 	return nil, err
-		// }
 		r = bytes.NewReader(buf)
 	} else {
 		r = strings.NewReader(b.Body)
