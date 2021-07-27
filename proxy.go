@@ -37,7 +37,7 @@ func proxy(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set(xHost, r.URL.Host)
 	req.Header.Set(xProto, r.Proto)
 
-	res, err := client.Do(req)
+	res, err := DefaultClient.client.Do(req)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		io.WriteString(w, err.Error())
