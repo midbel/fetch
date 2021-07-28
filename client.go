@@ -50,6 +50,18 @@ func WithProxy(addr string) Option {
 	}
 }
 
+func WithTransform(fn TransformFunc) Option {
+	return func(c *Client) {
+		c.transform = fn
+	}
+}
+
+func WithDefaultHeaders() Option {
+	return func(c *Client) {
+		c.addDefault = true
+	}
+}
+
 func WithConfig(cfg *tls.Config) Option {
 	return func(c *Client) {
 		t, ok := c.client.Transport.(*http.Transport)
@@ -73,7 +85,9 @@ type Client struct {
 
 	headers http.Header
 	hooks   []HookFunc
+	transform TransformFunc
 
+	addDefault bool
 	user    string
 	pass    string
 	retry   int
@@ -243,16 +257,21 @@ func (c Client) prepare(meth, url string, bd body) (*http.Request, error) {
 		req.Header.Set("content-type", bd.Type)
 	}
 
-	req.Header.Add("accept-encoding", encgzip)
-	req.Header.Add("accept-encoding", encflate)
-	req.Header.Add("accept", ctjson)
-	req.Header.Add("accept", ctxml)
+	if c.addDefault {
+		req.Header.Add("accept-encoding", encgzip)
+		req.Header.Add("accept-encoding", encflate)
+		req.Header.Add("accept", ctjson)
+		req.Header.Add("accept", ctxml)
+	}
 
 	for k, v := range c.headers {
 		req.Header[k] = v
 	}
 	if c.user != "" {
 		req.SetBasicAuth(c.user, c.pass)
+	}
+	if c.transform != nil {
+		c.transform(req)
 	}
 	return req, nil
 }

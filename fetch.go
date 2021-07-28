@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 )
 
@@ -22,6 +23,8 @@ const (
 type DoFunc func(string, io.Reader) error
 
 type DecodeFunc func(io.Reader, string, interface{}) error
+
+type TransformFunc func(*http.Request) error
 
 var decoders = make(map[string]DecodeFunc)
 
