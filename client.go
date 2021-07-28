@@ -8,12 +8,14 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/midbel/try"
 )
 
-var DefaultClient Client
+var defaultClient Client
 
 func init() {
-	DefaultClient = NewClient(WithTimeout(time.Second * 5))
+	defaultClient = NewClient(WithTimeout(time.Second * 5))
 }
 
 type Option func(*Client)
@@ -58,6 +60,12 @@ func WithConfig(cfg *tls.Config) Option {
 	}
 }
 
+func WithRetry(attempt int) Option {
+	return func(c *Client) {
+		c.retry = attempt
+	}
+}
+
 type HookFunc func(http.Header) error
 
 type Client struct {
@@ -66,8 +74,9 @@ type Client struct {
 	headers http.Header
 	hooks   []HookFunc
 
-	user string
-	pass string
+	user    string
+	pass    string
+	retry   int
 }
 
 func NewClient(options ...Option) Client {
@@ -106,16 +115,48 @@ func (c Client) PostJSON(url string, in, out interface{}) error {
 	return c.doJSON(http.MethodPost, url, in, out)
 }
 
+func (c Client) PostXML(url string, in, out interface{}) error {
+	return c.doXML(http.MethodPost, url, in, out)
+}
+
+// func (c Client) PostWithBody(url string, r io.Reader, do DoFunc) error {
+// 	return nil
+// }
+
 func (c Client) PutJSON(url string, in, out interface{}) error {
 	return c.doJSON(http.MethodPut, url, in, out)
 }
+
+func (c Client) PutXML(url string, in, out interface{}) error {
+	return c.doXML(http.MethodPut, url, in, out)
+}
+
+// func (c Client) PutWithBody(url string, r io.Reader, do DoFunc) error {
+// 	return nil
+// }
 
 func (c Client) PatchJSON(url string, in, out interface{}) error {
 	return c.doJSON(http.MethodPatch, url, in, out)
 }
 
-func (c Client) Delete(url string) error {
+func (c Client) PatchXML(url string, in, out interface{}) error {
+	return c.doXML(http.MethodPatch, url, in, out)
+}
+
+// func (c Client) PatchWithBody(url string, r io.Reader, do DoFunc) error {
+// 	return nil
+// }
+
+func (c Client) Delete(url string, out interface{}) error {
 	return nil
+}
+
+func (c Client) Options(url string) (http.Header, error) {
+	return nil, nil
+}
+
+func (c Client) Head(url string) (http.Header, error) {
+	return nil, nil
 }
 
 func (c Client) doGet(url string, do DoFunc) error {
@@ -128,6 +169,18 @@ func (c Client) doGet(url string, do DoFunc) error {
 
 func (c Client) doJSON(meth, url string, in, out interface{}) error {
 	bd, err := encodeJSON(in)
+	if err != nil {
+		return err
+	}
+	res, err := c.execute(meth, url, bd)
+	if err != nil {
+		return err
+	}
+	return c.decodeResponse(res, decodeBody(out))
+}
+
+func (c Client) doXML(meth, url string, in, out interface{}) error {
+	bd, err := encodeXML(in)
 	if err != nil {
 		return err
 	}
@@ -170,7 +223,15 @@ func (c Client) execute(meth, url string, bd body) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.client.Do(req)
+	var res *http.Response
+	err = try.Try(c.retry, func(_ int) error {
+		r, err := c.client.Do(req)
+		if err == nil {
+			res = r
+		}
+		return err
+	})
+	return res, err
 }
 
 func (c Client) prepare(meth, url string, bd body) (*http.Request, error) {

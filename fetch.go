@@ -30,27 +30,27 @@ func RegisterDecodeFunc(ct string, fn DecodeFunc) {
 }
 
 func Get(url string, out interface{}) error {
-	return DefaultClient.Get(url, out)
+	return defaultClient.Get(url, out)
 }
 
 func GetWith(url string, do DoFunc) error {
-	return DefaultClient.GetWith(url, do)
+	return defaultClient.GetWith(url, do)
 }
 
 func Follow(url string, rel RelType, do DoFunc) error {
-	return DefaultClient.Follow(url, rel, do)
+	return defaultClient.Follow(url, rel, do)
 }
 
 func PostJSON(url string, in, out interface{}) error {
-	return DefaultClient.PostJSON(url, in, out)
+	return defaultClient.PostJSON(url, in, out)
 }
 
 func PutJSON(url string, in, out interface{}) error {
-	return DefaultClient.PutJSON(url, in, out)
+	return defaultClient.PutJSON(url, in, out)
 }
 
 func PatchJSON(url string, in, out interface{}) error {
-	return DefaultClient.PatchJSON(url, in, out)
+	return defaultClient.PatchJSON(url, in, out)
 }
 
 type RelType byte
