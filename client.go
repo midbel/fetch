@@ -78,9 +78,9 @@ func WithRetry(attempt int) Option {
 	}
 }
 
-func WithFileCache(dir string, ttl time.Duration) Option {
+func WithFileCache(dir string, size int, ttl time.Duration) Option {
 	return func(c *Client) {
-		c.Cache = FileCache(dir, ttl)
+		c.Cache = FileCache(dir, size, ttl)
 	}
 }
 

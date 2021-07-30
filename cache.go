@@ -32,14 +32,18 @@ type cache struct {
 
 	mu    sync.Mutex
 	items map[uint32]*item
+	size  int
 }
 
-func FileCache(dir string, ttl time.Duration) Cache {
-	return &cache{
+func FileCache(dir string, size int, ttl time.Duration) Cache {
+	c := cache{
 		dir:   filepath.Join(dir, cacheFile),
 		ttl:   ttl,
+		size:  size,
 		items: make(map[uint32]*item),
 	}
+	go c.clean()
+	return &c
 }
 
 func (c *cache) Get(url string, do DoFunc) error {
@@ -98,6 +102,27 @@ func (c *cache) get(url string) (*item, error) {
 		return nil, errExpired
 	}
 	return i, nil
+}
+
+func (c *cache) clean() {
+	if c.size <= 0 {
+		return
+	}
+	wait := c.ttl * 3
+	for n := range time.Tick(wait) {
+		if len(c.items) < c.size {
+			continue
+		}
+		c.mu.Lock()
+		for k, i := range c.items {
+			if n.Sub(i.when) < wait {
+				continue
+			}
+			delete(c.items, k)
+			os.Remove(i.file)
+		}
+		c.mu.Unlock()
+	}
 }
 
 type item struct {
