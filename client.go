@@ -78,19 +78,27 @@ func WithRetry(attempt int) Option {
 	}
 }
 
+func WithFileCache(dir string, ttl time.Duration) Option {
+	return func(c *Client) {
+		c.cache = FileCache(dir, ttl)
+	}
+}
+
 type HookFunc func(http.Header) error
 
 type Client struct {
 	client http.Client
 
-	headers http.Header
-	hooks   []HookFunc
+	headers   http.Header
+	hooks     []HookFunc
 	transform TransformFunc
 
 	addDefault bool
-	user    string
-	pass    string
-	retry   int
+	user       string
+	pass       string
+	retry      int
+
+	cache Cache
 }
 
 func NewClient(options ...Option) Client {
@@ -103,9 +111,11 @@ func NewClient(options ...Option) Client {
 			TLSHandshakeTimeout: 2500 * time.Millisecond,
 		},
 	}
+
 	c := Client{
 		client:  i,
 		headers: make(http.Header),
+		cache:   noopcache{},
 	}
 	for _, fn := range options {
 		fn(&c)
@@ -113,75 +123,83 @@ func NewClient(options ...Option) Client {
 	return c
 }
 
-func (c Client) Get(url string, out interface{}) error {
+func (c *Client) Get(url string, out interface{}) error {
 	return c.doGet(url, decodeBody(out))
 }
 
-func (c Client) GetWith(url string, do DoFunc) error {
+func (c *Client) GetWith(url string, do DoFunc) error {
 	return c.doGet(url, do)
 }
 
-func (c Client) Follow(url string, rel RelType, do DoFunc) error {
+func (c *Client) Follow(url string, rel RelType, do DoFunc) error {
 	return c.doFollow(url, rel, do)
 }
 
-func (c Client) PostJSON(url string, in, out interface{}) error {
+func (c *Client) PostJSON(url string, in, out interface{}) error {
 	return c.doJSON(http.MethodPost, url, in, out)
 }
 
-func (c Client) PostXML(url string, in, out interface{}) error {
+func (c *Client) PostXML(url string, in, out interface{}) error {
 	return c.doXML(http.MethodPost, url, in, out)
 }
 
-// func (c Client) PostWithBody(url string, r io.Reader, do DoFunc) error {
+// func (c *Client) PostWithBody(url string, r io.Reader, do DoFunc) error {
 // 	return nil
 // }
 
-func (c Client) PutJSON(url string, in, out interface{}) error {
+func (c *Client) PutJSON(url string, in, out interface{}) error {
 	return c.doJSON(http.MethodPut, url, in, out)
 }
 
-func (c Client) PutXML(url string, in, out interface{}) error {
+func (c *Client) PutXML(url string, in, out interface{}) error {
 	return c.doXML(http.MethodPut, url, in, out)
 }
 
-// func (c Client) PutWithBody(url string, r io.Reader, do DoFunc) error {
+// func (c *Client) PutWithBody(url string, r io.Reader, do DoFunc) error {
 // 	return nil
 // }
 
-func (c Client) PatchJSON(url string, in, out interface{}) error {
+func (c *Client) PatchJSON(url string, in, out interface{}) error {
 	return c.doJSON(http.MethodPatch, url, in, out)
 }
 
-func (c Client) PatchXML(url string, in, out interface{}) error {
+func (c *Client) PatchXML(url string, in, out interface{}) error {
 	return c.doXML(http.MethodPatch, url, in, out)
 }
 
-// func (c Client) PatchWithBody(url string, r io.Reader, do DoFunc) error {
+// func (c *Client) PatchWithBody(url string, r io.Reader, do DoFunc) error {
 // 	return nil
 // }
 
-func (c Client) Delete(url string, out interface{}) error {
+func (c *Client) Delete(url string, out interface{}) error {
 	return nil
 }
 
-func (c Client) Options(url string) (http.Header, error) {
+func (c *Client) Options(url string) (http.Header, error) {
 	return nil, nil
 }
 
-func (c Client) Head(url string) (http.Header, error) {
+func (c *Client) Head(url string) (http.Header, error) {
 	return nil, nil
 }
 
-func (c Client) doGet(url string, do DoFunc) error {
+func (c *Client) doGet(url string, do DoFunc) error {
+	if c.cache != nil {
+		if err := c.cache.Get(url, do); err == nil {
+			return err
+		}
+	}
 	res, err := c.execute(http.MethodGet, url, emptyBody())
 	if err != nil {
 		return err
 	}
+	if c.cache != nil {
+		do = c.cache.Do(res.Request.URL, do)
+	}
 	return c.decodeResponse(res, do)
 }
 
-func (c Client) doJSON(meth, url string, in, out interface{}) error {
+func (c *Client) doJSON(meth, url string, in, out interface{}) error {
 	bd, err := encodeJSON(in)
 	if err != nil {
 		return err
@@ -193,7 +211,7 @@ func (c Client) doJSON(meth, url string, in, out interface{}) error {
 	return c.decodeResponse(res, decodeBody(out))
 }
 
-func (c Client) doXML(meth, url string, in, out interface{}) error {
+func (c *Client) doXML(meth, url string, in, out interface{}) error {
 	bd, err := encodeXML(in)
 	if err != nil {
 		return err
@@ -205,7 +223,7 @@ func (c Client) doXML(meth, url string, in, out interface{}) error {
 	return c.decodeResponse(res, decodeBody(out))
 }
 
-func (c Client) doFollow(url string, rel RelType, do DoFunc) error {
+func (c *Client) doFollow(url string, rel RelType, do DoFunc) error {
 	var (
 		list []string
 		seen = make(map[string]struct{})
@@ -232,7 +250,7 @@ func (c Client) doFollow(url string, rel RelType, do DoFunc) error {
 	return nil
 }
 
-func (c Client) execute(meth, url string, bd body) (*http.Response, error) {
+func (c *Client) execute(meth, url string, bd body) (*http.Response, error) {
 	req, err := c.prepare(meth, url, bd)
 	if err != nil {
 		return nil, err
@@ -248,7 +266,7 @@ func (c Client) execute(meth, url string, bd body) (*http.Response, error) {
 	return res, err
 }
 
-func (c Client) prepare(meth, url string, bd body) (*http.Request, error) {
+func (c *Client) prepare(meth, url string, bd body) (*http.Request, error) {
 	req, err := http.NewRequest(meth, url, bd.Reader)
 	if err != nil {
 		return nil, err
@@ -276,7 +294,7 @@ func (c Client) prepare(meth, url string, bd body) (*http.Request, error) {
 	return req, nil
 }
 
-func (c Client) decodeResponse(res *http.Response, do DoFunc) error {
+func (c *Client) decodeResponse(res *http.Response, do DoFunc) error {
 	defer res.Body.Close()
 
 	if res.StatusCode >= http.StatusBadRequest {
@@ -314,7 +332,7 @@ func (c Client) decodeResponse(res *http.Response, do DoFunc) error {
 	return do(res.Header.Get("content-type"), body)
 }
 
-func (c Client) intercept(res *http.Response) error {
+func (c *Client) intercept(res *http.Response) error {
 	for _, fn := range c.hooks {
 		if err := fn(res.Header); err != nil {
 			return err
