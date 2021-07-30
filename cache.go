@@ -16,6 +16,11 @@ type Cache interface {
 	Do(*url.URL, DoFunc) DoFunc
 }
 
+const (
+	fileIndex = "index"
+	cacheFile = ".cache"
+)
+
 var (
 	errMissing = errors.New("missing")
 	errExpired = errors.New("expired")
@@ -31,7 +36,7 @@ type cache struct {
 
 func FileCache(dir string, ttl time.Duration) Cache {
 	return &cache{
-		dir:   filepath.Join(dir, ".cache"),
+		dir:   filepath.Join(dir, cacheFile),
 		ttl:   ttl,
 		items: make(map[uint32]*item),
 	}
@@ -57,7 +62,11 @@ func (c *cache) Do(loc *url.URL, do DoFunc) DoFunc {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 
-		file := filepath.Join(c.dir, loc.Path)
+		file := loc.Path
+		if file == "" || file == "/" {
+			file = fileIndex
+		}
+		file = filepath.Join(c.dir, loc.Hostname(), file)
 		if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
 			return err
 		}

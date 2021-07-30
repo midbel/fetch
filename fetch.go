@@ -33,27 +33,31 @@ func RegisterDecodeFunc(ct string, fn DecodeFunc) {
 }
 
 func Get(url string, out interface{}) error {
-	return defaultClient.Get(url, out)
+	return DefaultClient.Get(url, out)
 }
 
 func GetWith(url string, do DoFunc) error {
-	return defaultClient.GetWith(url, do)
+	return DefaultClient.GetWith(url, do)
 }
 
 func Follow(url string, rel RelType, do DoFunc) error {
-	return defaultClient.Follow(url, rel, do)
+	return DefaultClient.Follow(url, rel, do)
+}
+
+func Query(url, query string, vars Values, out interface{}) error {
+	return DefaultClient.Query(url, query, vars, out)
 }
 
 func PostJSON(url string, in, out interface{}) error {
-	return defaultClient.PostJSON(url, in, out)
+	return DefaultClient.PostJSON(url, in, out)
 }
 
 func PutJSON(url string, in, out interface{}) error {
-	return defaultClient.PutJSON(url, in, out)
+	return DefaultClient.PutJSON(url, in, out)
 }
 
 func PatchJSON(url string, in, out interface{}) error {
-	return defaultClient.PatchJSON(url, in, out)
+	return DefaultClient.PatchJSON(url, in, out)
 }
 
 type RelType byte
@@ -158,4 +162,17 @@ func makeBody(ct string, r io.Reader) body {
 		Type:   ct,
 		Reader: r,
 	}
+}
+
+func makeQuery(query string, vars Values) interface{} {
+	q := struct {
+		Query string                 `json:"query"`
+		Vars  map[string]interface{} `json:"variables,omitempty"`
+	}{
+		Query: query,
+	}
+	if len(vars) > 0 {
+		q.Vars = vars
+	}
+	return q
 }
