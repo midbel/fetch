@@ -4,9 +4,13 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"crypto/tls"
+	"fmt"
+	"hash/adler32"
 	"io"
 	"net"
 	"net/http"
+	urllib "net/url"
+	"path"
 	"time"
 
 	"github.com/midbel/try"
@@ -84,6 +88,15 @@ func WithFileCache(dir string, size int, ttl time.Duration) Option {
 	}
 }
 
+func WithBoltCache(ttl time.Duration) Option {
+	return func(c *Client) {
+		bc, err := BoltCache(ttl)
+		if err == nil {
+			c.Cache = bc
+		}
+	}
+}
+
 type HookFunc func(http.Header) error
 
 type Client struct {
@@ -148,7 +161,7 @@ func (c *Client) Query(url, query string, vars Values, out interface{}) error {
 	}{
 		Data: out,
 	}
-	return c.doJSON(http.MethodPost, url, true, q, &r)
+	return c.doQuery(http.MethodPost, url, query, q, &r)
 }
 
 func (c *Client) Follow(url string, rel RelType, do DoFunc) error {
@@ -215,6 +228,32 @@ func (c *Client) doGet(url string, do DoFunc) error {
 	}
 	if c.Cache != nil {
 		do = c.Cache.Do(res.Request.URL, do)
+	}
+	return c.decodeResponse(res, do)
+}
+
+func (c *Client) doQuery(meth, url, query string, in, out interface{}) error {
+	do := decodeBody(out)
+	loc, err := urllib.Parse(url)
+	if err != nil {
+		return err
+	}
+	loc.Path = path.Join(loc.Path, fmt.Sprintf("%x", adler32.Checksum([]byte(query))))
+	if c.Cache != nil {
+		if err := c.Cache.Get(loc.String(), do); err == nil {
+			return err
+		}
+	}
+	bd, err := encodeJSON(in)
+	if err != nil {
+		return err
+	}
+	res, err := c.execute(meth, url, bd)
+	if err != nil {
+		return err
+	}
+	if c.Cache != nil {
+		do = c.Cache.Do(loc, do)
 	}
 	return c.decodeResponse(res, do)
 }

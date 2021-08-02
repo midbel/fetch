@@ -1,14 +1,18 @@
 package fetch
 
 import (
+	"bytes"
 	"errors"
 	"hash/adler32"
 	"io"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+
+	bolt "go.etcd.io/bbolt"
 )
 
 type Cache interface {
@@ -70,7 +74,7 @@ func (c *cache) Do(loc *url.URL, do DoFunc) DoFunc {
 		if file == "" || file == "/" {
 			file = fileIndex
 		}
-		file = filepath.Join(c.dir, loc.Hostname(), file)
+		file = filepath.Join(c.dir, strings.ReplaceAll(loc.Host, ":", "_"), file)
 		if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
 			return err
 		}
@@ -160,4 +164,101 @@ func (noopcache) Get(_ string, _ DoFunc) error {
 
 func (noopcache) Do(_ *url.URL, do DoFunc) DoFunc {
 	return do
+}
+
+const (
+	rawBucket  = "raw"
+	typeBucket = "type"
+	timeBucket = "time"
+)
+
+type boltcache struct {
+	db *bolt.DB
+	ttl time.Duration
+}
+
+func BoltCache(ttl time.Duration) (Cache, error) {
+	db, err := bolt.Open(cacheFile, 0644, nil)
+	if err != nil {
+		return nil, err
+	}
+	c := boltcache{
+		db: db,
+		ttl: ttl,
+	}
+	err = c.db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte(rawBucket))
+		if err == nil {
+			_, err = tx.CreateBucketIfNotExists([]byte(typeBucket))
+		}
+		if err == nil {
+			_, err = tx.CreateBucketIfNotExists([]byte(timeBucket))
+		}
+		return err
+	})
+	return &c, err
+}
+
+func (b *boltcache) Get(url string, do DoFunc) error {
+	if b.ttl <= 0 {
+		return errMissing
+	}
+	key := []byte(url)
+	return b.db.View(func(tx *bolt.Tx) error {
+		var (
+			bk = tx.Bucket([]byte(timeBucket))
+			when time.Time
+		)
+		if err := when.UnmarshalBinary(bk.Get(key)); err != nil {
+			return errExpired
+		}
+		if time.Since(when) >= b.ttl {
+			return errExpired
+		}
+
+		bk = tx.Bucket([]byte(rawBucket))
+		vs := bk.Get(key)
+		if len(vs) == 0 {
+			return errMissing
+		}
+		bk = tx.Bucket([]byte(typeBucket))
+		return do(string(bk.Get(key)), bytes.NewReader(vs))
+	})
+}
+
+func (b *boltcache) Do(loc *url.URL, do DoFunc) DoFunc {
+	if b.ttl <= 0 {
+		return do
+	}
+	key := []byte(loc.String())
+	return func(ct string, r io.Reader) error {
+		var (
+			buf bytes.Buffer
+			err error
+			now = time.Now()
+		)
+		if err = do(ct, io.TeeReader(r, &buf)); err != nil {
+			return err
+		}
+		err = b.db.Update(func(tx *bolt.Tx) error {
+			var (
+				bk = tx.Bucket([]byte(timeBucket))
+				ns, _ = now.MarshalBinary()
+			)
+			if err := bk.Put(key, ns); err != nil {
+				return err
+			}
+			bk = tx.Bucket([]byte(rawBucket))
+			if err := bk.Put(key, buf.Bytes()); err != nil {
+				return err
+			}
+			bk = tx.Bucket([]byte(typeBucket))
+			return bk.Put(key, []byte(ct))
+		})
+		return err
+	}
+}
+
+func (b *boltcache) Close() error {
+	return b.db.Close()
 }
