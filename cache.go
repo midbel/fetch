@@ -2,22 +2,24 @@ package fetch
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash/adler32"
 	"io"
-	"net/url"
+	urllib "net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/midbel/xxh"
 	bolt "go.etcd.io/bbolt"
 )
 
 type Cache interface {
 	Get(string, DoFunc) error
-	Do(*url.URL, DoFunc) DoFunc
+	Do(*urllib.URL, DoFunc) DoFunc
 }
 
 const (
@@ -30,7 +32,7 @@ var (
 	errExpired = errors.New("expired")
 )
 
-type cache struct {
+type filecache struct {
 	dir string
 	ttl time.Duration
 
@@ -40,17 +42,20 @@ type cache struct {
 }
 
 func FileCache(dir string, size int, ttl time.Duration) Cache {
-	c := cache{
+	c := filecache{
 		dir:   filepath.Join(dir, cacheFile),
 		ttl:   ttl,
 		size:  size,
 		items: make(map[uint32]*item),
 	}
-	go c.clean()
+	if ttl == 0 {
+		ttl *= 5
+	}
+	go c.clean(ttl)
 	return &c
 }
 
-func (c *cache) Get(url string, do DoFunc) error {
+func (c *filecache) Get(url string, do DoFunc) error {
 	if c.ttl <= 0 {
 		return errExpired
 	}
@@ -61,21 +66,18 @@ func (c *cache) Get(url string, do DoFunc) error {
 	return err
 }
 
-func (c *cache) Do(loc *url.URL, do DoFunc) DoFunc {
+func (c *filecache) Do(loc *urllib.URL, do DoFunc) DoFunc {
 	if c.ttl <= 0 {
 		return do
 	}
-	key := adler32.Checksum([]byte(loc.String()))
 	return func(ct string, r io.Reader) error {
+		key := c.key(loc.String())
+
 		c.mu.Lock()
 		defer c.mu.Unlock()
 
-		file := loc.Path
-		if file == "" || file == "/" {
-			file = fileIndex
-		}
-		file = filepath.Join(c.dir, strings.ReplaceAll(loc.Host, ":", "_"), file)
-		if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+		file, err := c.prepare(loc.String(), loc.Hostname())
+		if err != nil {
 			return err
 		}
 		w, err := os.Create(file)
@@ -91,8 +93,14 @@ func (c *cache) Do(loc *url.URL, do DoFunc) DoFunc {
 	}
 }
 
-func (c *cache) get(url string) (*item, error) {
-	key := adler32.Checksum([]byte(url))
+func (c *filecache) prepare(url, dir string) (string, error) {
+	file := fmt.Sprintf("%16x", xxh.Sum64([]byte(url), 0))
+	file = filepath.Join(c.dir, dir, file)
+	return file, os.MkdirAll(filepath.Dir(file), 0755)
+}
+
+func (c *filecache) get(url string) (*item, error) {
+	key := c.key(url)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -108,11 +116,10 @@ func (c *cache) get(url string) (*item, error) {
 	return i, nil
 }
 
-func (c *cache) clean() {
+func (c *filecache) clean(wait time.Duration) {
 	if c.size <= 0 {
 		return
 	}
-	wait := c.ttl * 3
 	for n := range time.Tick(wait) {
 		if len(c.items) < c.size {
 			continue
@@ -127,6 +134,10 @@ func (c *cache) clean() {
 		}
 		c.mu.Unlock()
 	}
+}
+
+func (c *filecache) key(str string) uint32 {
+	return adler32.Checksum([]byte(str))
 }
 
 type item struct {
@@ -162,32 +173,33 @@ func (noopcache) Get(_ string, _ DoFunc) error {
 	return errMissing
 }
 
-func (noopcache) Do(_ *url.URL, do DoFunc) DoFunc {
+func (noopcache) Do(_ *urllib.URL, do DoFunc) DoFunc {
 	return do
 }
 
 const (
-	rawBucket  = "raw"
+	dataBucket = "data"
 	typeBucket = "type"
 	timeBucket = "time"
 )
 
 type boltcache struct {
-	db *bolt.DB
+	db  *bolt.DB
 	ttl time.Duration
 }
 
 func BoltCache(ttl time.Duration) (Cache, error) {
+	os.Remove(cacheFile)
 	db, err := bolt.Open(cacheFile, 0644, nil)
 	if err != nil {
 		return nil, err
 	}
 	c := boltcache{
-		db: db,
+		db:  db,
 		ttl: ttl,
 	}
 	err = c.db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(rawBucket))
+		_, err := tx.CreateBucketIfNotExists([]byte(dataBucket))
 		if err == nil {
 			_, err = tx.CreateBucketIfNotExists([]byte(typeBucket))
 		}
@@ -199,66 +211,88 @@ func BoltCache(ttl time.Duration) (Cache, error) {
 	return &c, err
 }
 
+func (b *boltcache) Close() error {
+	b.db.Close()
+	return os.Remove(cacheFile)
+}
+
 func (b *boltcache) Get(url string, do DoFunc) error {
 	if b.ttl <= 0 {
 		return errMissing
 	}
-	key := []byte(url)
-	return b.db.View(func(tx *bolt.Tx) error {
+	return b.get(url, do)
+}
+
+func (b *boltcache) Do(loc *urllib.URL, do DoFunc) DoFunc {
+	if b.ttl <= 0 {
+		return do
+	}
+	url := loc.String()
+	return func(ct string, r io.Reader) error {
+		return b.do(url, do, ct, r)
+	}
+}
+
+func (b *boltcache) get(url string, do DoFunc) error {
+	key := b.key(url)
+	err := b.db.View(func(tx *bolt.Tx) error {
 		var (
-			bk = tx.Bucket([]byte(timeBucket))
+			bk   = tx.Bucket([]byte(timeBucket))
+			vs   []byte
 			when time.Time
 		)
 		if err := when.UnmarshalBinary(bk.Get(key)); err != nil {
-			return errExpired
+			return errMissing
 		}
 		if time.Since(when) >= b.ttl {
 			return errExpired
 		}
 
-		bk = tx.Bucket([]byte(rawBucket))
-		vs := bk.Get(key)
-		if len(vs) == 0 {
-			return errMissing
-		}
+		bk = tx.Bucket([]byte(dataBucket))
+		vs = bk.Get(key)
 		bk = tx.Bucket([]byte(typeBucket))
-		return do(string(bk.Get(key)), bytes.NewReader(vs))
+		err := do(string(bk.Get(key)), bytes.NewReader(vs))
+		return err
 	})
+	return err
 }
 
-func (b *boltcache) Do(loc *url.URL, do DoFunc) DoFunc {
-	if b.ttl <= 0 {
-		return do
-	}
-	key := []byte(loc.String())
-	return func(ct string, r io.Reader) error {
+func (b *boltcache) do(url string, do DoFunc, ct string, r io.Reader) error {
+	var (
+		buf bytes.Buffer
+		key = b.key(url)
+		now = time.Now()
+	)
+	errd := do(ct, io.TeeReader(r, &buf))
+	errb := b.db.Update(func(tx *bolt.Tx) error {
 		var (
-			buf bytes.Buffer
-			err error
-			now = time.Now()
+			bk    = tx.Bucket([]byte(timeBucket))
+			ns, _ = now.MarshalBinary()
 		)
-		if err = do(ct, io.TeeReader(r, &buf)); err != nil {
+		if err := bk.Put(key, ns); err != nil {
 			return err
 		}
-		err = b.db.Update(func(tx *bolt.Tx) error {
-			var (
-				bk = tx.Bucket([]byte(timeBucket))
-				ns, _ = now.MarshalBinary()
-			)
-			if err := bk.Put(key, ns); err != nil {
-				return err
-			}
-			bk = tx.Bucket([]byte(rawBucket))
-			if err := bk.Put(key, buf.Bytes()); err != nil {
-				return err
-			}
-			bk = tx.Bucket([]byte(typeBucket))
-			return bk.Put(key, []byte(ct))
-		})
-		return err
+		bk = tx.Bucket([]byte(dataBucket))
+		if err := bk.Put(key, buf.Bytes()); err != nil {
+			return err
+		}
+		bk = tx.Bucket([]byte(typeBucket))
+		if err := bk.Put(key, []byte(ct)); err != nil {
+			return err
+		}
+		return nil
+	})
+	if errd != nil {
+		return errd
 	}
+	return errb
 }
 
-func (b *boltcache) Close() error {
-	return b.db.Close()
+func (b *boltcache) key(str string) []byte {
+	var (
+		xs = []byte(str)
+		bs = make([]byte, 8)
+	)
+	binary.BigEndian.PutUint64(bs, xxh.Sum64(xs, 0))
+	return bs
 }

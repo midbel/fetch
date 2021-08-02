@@ -1,5 +1,7 @@
 github.com/midbel/try v1.0.0 h1:4vwuw7PC5R8n/vYl7zO8UiXMOZXyXRufJlqpv+wZlP8=
 github.com/midbel/try v1.0.0/go.mod h1:vCPKhbkVv5vfCK104vNDbiPq6ws/u8po/uEds8Vziu8=
+github.com/midbel/xxh v1.1.0 h1:qugn98+4nDv3Vtg6nNASwmknGv4eafaPhhDI2lLapj8=
+github.com/midbel/xxh v1.1.0/go.mod h1:+WNtrCZLYEO+2kqw/lyISsnEuDiPYKudnq51PEACmZI=
 go.etcd.io/bbolt v1.3.6 h1:/ecaJf0sk1l4l6V4awd65v2C3ILy7MSj+s/x1ADCIMU=
 go.etcd.io/bbolt v1.3.6/go.mod h1:qXsaaIqmgQH0T+OPdb99Bf+PKfBBQVAdyD6TY9G8XM4=
 golang.org/x/sys v0.0.0-20200923182605-d9f96fdee20d h1:L/IKR6COd7ubZrs2oTnTi73IhgqJ71c9s80WsQnh0Es=

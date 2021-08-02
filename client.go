@@ -169,11 +169,11 @@ func (c *Client) Follow(url string, rel RelType, do DoFunc) error {
 }
 
 func (c *Client) PostJSON(url string, in, out interface{}) error {
-	return c.doJSON(http.MethodPost, url, false, in, out)
+	return c.doJSON(http.MethodPost, url, in, out)
 }
 
 func (c *Client) PostXML(url string, in, out interface{}) error {
-	return c.doXML(http.MethodPost, url, false, in, out)
+	return c.doXML(http.MethodPost, url, in, out)
 }
 
 // func (c *Client) PostWithBody(url string, r io.Reader, do DoFunc) error {
@@ -181,11 +181,11 @@ func (c *Client) PostXML(url string, in, out interface{}) error {
 // }
 
 func (c *Client) PutJSON(url string, in, out interface{}) error {
-	return c.doJSON(http.MethodPut, url, false, in, out)
+	return c.doJSON(http.MethodPut, url, in, out)
 }
 
 func (c *Client) PutXML(url string, in, out interface{}) error {
-	return c.doXML(http.MethodPut, url, false, in, out)
+	return c.doXML(http.MethodPut, url, in, out)
 }
 
 // func (c *Client) PutWithBody(url string, r io.Reader, do DoFunc) error {
@@ -193,11 +193,11 @@ func (c *Client) PutXML(url string, in, out interface{}) error {
 // }
 
 func (c *Client) PatchJSON(url string, in, out interface{}) error {
-	return c.doJSON(http.MethodPatch, url, false, in, out)
+	return c.doJSON(http.MethodPatch, url, in, out)
 }
 
 func (c *Client) PatchXML(url string, in, out interface{}) error {
-	return c.doXML(http.MethodPatch, url, false, in, out)
+	return c.doXML(http.MethodPatch, url, in, out)
 }
 
 // func (c *Client) PatchWithBody(url string, r io.Reader, do DoFunc) error {
@@ -227,7 +227,8 @@ func (c *Client) doGet(url string, do DoFunc) error {
 		return err
 	}
 	if c.Cache != nil {
-		do = c.Cache.Do(res.Request.URL, do)
+		loc, _ := urllib.Parse(url)
+		do = c.Cache.Do(loc, do)
 	}
 	return c.decodeResponse(res, do)
 }
@@ -258,13 +259,7 @@ func (c *Client) doQuery(meth, url, query string, in, out interface{}) error {
 	return c.decodeResponse(res, do)
 }
 
-func (c *Client) doJSON(meth, url string, idempotent bool, in, out interface{}) error {
-	do := decodeBody(out)
-	if idempotent && c.Cache != nil {
-		if err := c.Cache.Get(url, do); err == nil {
-			return err
-		}
-	}
+func (c *Client) doJSON(meth, url string, in, out interface{}) error {
 	bd, err := encodeJSON(in)
 	if err != nil {
 		return err
@@ -273,19 +268,10 @@ func (c *Client) doJSON(meth, url string, idempotent bool, in, out interface{}) 
 	if err != nil {
 		return err
 	}
-	if idempotent && c.Cache != nil {
-		do = c.Cache.Do(res.Request.URL, do)
-	}
-	return c.decodeResponse(res, do)
+	return c.decodeResponse(res, decodeBody(out))
 }
 
-func (c *Client) doXML(meth, url string, idem bool, in, out interface{}) error {
-	do := decodeBody(out)
-	if idem && c.Cache != nil {
-		if err := c.Cache.Get(url, do); err == nil {
-			return err
-		}
-	}
+func (c *Client) doXML(meth, url string, in, out interface{}) error {
 	bd, err := encodeXML(in)
 	if err != nil {
 		return err
@@ -293,9 +279,6 @@ func (c *Client) doXML(meth, url string, idem bool, in, out interface{}) error {
 	res, err := c.execute(meth, url, bd)
 	if err != nil {
 		return err
-	}
-	if idem && c.Cache != nil {
-		do = c.Cache.Do(res.Request.URL, do)
 	}
 	return c.decodeResponse(res, decodeBody(out))
 }
