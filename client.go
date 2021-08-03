@@ -282,7 +282,11 @@ func (c *Client) doJSON(meth, url string, in, out interface{}) error {
 	if err != nil {
 		return err
 	}
-	return c.decodeResponse(res, decodeBody(out))
+	var do DoFunc
+	if out != nil {
+		do = decodeBody(out)
+	}
+	return c.decodeResponse(res, do)
 }
 
 func (c *Client) doXML(meth, url string, in, out interface{}) error {
@@ -294,7 +298,11 @@ func (c *Client) doXML(meth, url string, in, out interface{}) error {
 	if err != nil {
 		return err
 	}
-	return c.decodeResponse(res, decodeBody(out))
+	var do DoFunc
+	if out != nil {
+		do = decodeBody(out)
+	}
+	return c.decodeResponse(res, do)
 }
 
 func (c *Client) doFollow(url string, rel RelType, do DoFunc) error {
