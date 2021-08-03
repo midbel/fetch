@@ -205,7 +205,11 @@ func (c *Client) PatchXML(url string, in, out interface{}) error {
 // }
 
 func (c *Client) Delete(url string, out interface{}) error {
-	return nil
+	var do DoFunc
+	if out != nil {
+		do = decodeBody(out)
+	}
+	return c.doDelete(url, do)
 }
 
 func (c *Client) Options(url string) (http.Header, error) {
@@ -214,6 +218,14 @@ func (c *Client) Options(url string) (http.Header, error) {
 
 func (c *Client) Head(url string) (http.Header, error) {
 	return nil, nil
+}
+
+func (c *Client) doDelete(url string, do DoFunc) error {
+	res, err := c.execute(http.MethodDelete, url, emptyBody())
+	if err != nil {
+		return err
+	}
+	return c.decodeResponse(res, do)
 }
 
 func (c *Client) doGet(url string, do DoFunc) error {
@@ -369,7 +381,7 @@ func (c *Client) decodeResponse(res *http.Response, do DoFunc) error {
 		return err
 	}
 
-	if res.StatusCode == http.StatusNoContent {
+	if res.StatusCode == http.StatusNoContent || do == nil {
 		return nil
 	}
 

@@ -40,6 +40,10 @@ func GetWith(url string, do DoFunc) error {
 	return DefaultClient.GetWith(url, do)
 }
 
+func Delete(url string, out interface{}) error {
+	return DefaultClient.Delete(url, out)
+}
+
 func Follow(url string, rel RelType, do DoFunc) error {
 	return DefaultClient.Follow(url, rel, do)
 }
