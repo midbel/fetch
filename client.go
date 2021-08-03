@@ -218,7 +218,9 @@ func (c *Client) Head(url string) (http.Header, error) {
 
 func (c *Client) doGet(url string, do DoFunc) error {
 	if c.Cache != nil {
-		if err := c.Cache.Get(url, do); err == nil {
+		switch err := c.Cache.Get(url, do); err {
+		case errMissing, errExpired:
+		default:
 			return err
 		}
 	}

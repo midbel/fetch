@@ -19,7 +19,7 @@ func main() {
 
 	c := fetch.NewClient(fetch.WithBoltCache(*ttl))
 	for i := 0; i < 100; i++ {
-    now := time.Now()
+		now := time.Now()
 		err := c.GetWith(flag.Arg(0), func(_ string, r io.Reader) error {
 			n, err := io.Copy(ioutil.Discard, r)
 			fmt.Println("main.bytes.read:", n, time.Since(now))

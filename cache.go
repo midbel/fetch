@@ -48,10 +48,10 @@ func FileCache(dir string, size int, ttl time.Duration) Cache {
 		size:  size,
 		items: make(map[uint32]*item),
 	}
-	if ttl == 0 {
-		ttl *= 5
+	os.RemoveAll(c.dir)
+	if ttl != 0 {
+		go c.clean(ttl * 5)
 	}
-	go c.clean(ttl)
 	return &c
 }
 
@@ -70,9 +70,8 @@ func (c *filecache) Do(loc *urllib.URL, do DoFunc) DoFunc {
 	if c.ttl <= 0 {
 		return do
 	}
+	key := c.key(loc.String())
 	return func(ct string, r io.Reader) error {
-		key := c.key(loc.String())
-
 		c.mu.Lock()
 		defer c.mu.Unlock()
 
