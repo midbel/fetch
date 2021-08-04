@@ -44,6 +44,10 @@ func Delete(url string, out interface{}) error {
 	return DefaultClient.Delete(url, out)
 }
 
+func DeleteJSON(url string, in, out interface{}) error {
+	return DefaultClient.DeleteJSON(url, in, out)
+}
+
 func Follow(url string, rel RelType, do DoFunc) error {
 	return DefaultClient.Follow(url, rel, do)
 }

@@ -212,6 +212,10 @@ func (c *Client) Delete(url string, out interface{}) error {
 	return c.doDelete(url, do)
 }
 
+func (c *Client) DeleteJSON(url string, in, out interface{}) error {
+	return c.doJSON(http.MethodDelete, url, in, out)
+}
+
 func (c *Client) Options(url string) (http.Header, error) {
 	return nil, nil
 }
