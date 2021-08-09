@@ -158,10 +158,17 @@ func (c *Client) Query(url, query string, vars Values, out interface{}) error {
 	q := makeQuery(query, vars)
 	r := struct {
 		Data interface{}
+		Errors []struct {
+			Message string
+		}
 	}{
 		Data: out,
 	}
-	return c.doQuery(http.MethodPost, url, query, q, &r)
+	err := c.doQuery(http.MethodPost, url, query, q, &r)
+	if z := len(r.Errors); err == nil && z > 0  {
+		err = fmt.Errorf("query returned %d error(s): %s,...", z, r.Errors[0].Message)
+	}
+	return err
 }
 
 func (c *Client) Follow(url string, rel RelType, do DoFunc) error {
