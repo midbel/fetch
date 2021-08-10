@@ -56,6 +56,10 @@ func Query(url, query string, vars Values, out interface{}) error {
 	return DefaultClient.Query(url, query, vars, out)
 }
 
+func QueryWith(url, query string, vars Values, do DoFunc) error {
+	return DefaultClient.QueryWith(url, query, vars, do)
+}
+
 func PostJSON(url string, in, out interface{}) error {
 	return DefaultClient.PostJSON(url, in, out)
 }

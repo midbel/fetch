@@ -157,15 +157,30 @@ func (c *Client) GetWith(url string, do DoFunc) error {
 func (c *Client) Query(url, query string, vars Values, out interface{}) error {
 	q := makeQuery(query, vars)
 	r := struct {
-		Data interface{}
+		Data   interface{}
 		Errors []struct {
 			Message string
 		}
 	}{
 		Data: out,
 	}
-	err := c.doQuery(http.MethodPost, url, query, q, &r)
-	if z := len(r.Errors); err == nil && z > 0  {
+	err := c.doQuery(http.MethodPost, url, query, q, decodeBody(&r))
+	if z := len(r.Errors); err == nil && z > 0 {
+		err = fmt.Errorf("query returned %d error(s): %s,...", z, r.Errors[0].Message)
+	}
+	return err
+}
+
+func (c *Client) QueryWith(url, query string, vars Values, do DoFunc) error {
+	q := makeQuery(query, vars)
+	r := struct {
+		Data   interface{}
+		Errors []struct {
+			Message string
+		}
+	}{}
+	err := c.doQuery(http.MethodPost, url, query, q, do)
+	if z := len(r.Errors); err == nil && z > 0 {
 		err = fmt.Errorf("query returned %d error(s): %s,...", z, r.Errors[0].Message)
 	}
 	return err
@@ -258,8 +273,7 @@ func (c *Client) doGet(url string, do DoFunc) error {
 	return c.decodeResponse(res, do)
 }
 
-func (c *Client) doQuery(meth, url, query string, in, out interface{}) error {
-	do := decodeBody(out)
+func (c *Client) doQuery(meth, url, query string, in interface{}, do DoFunc) error {
 	loc, err := urllib.Parse(url)
 	if err != nil {
 		return err
