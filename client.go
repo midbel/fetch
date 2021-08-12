@@ -3,6 +3,7 @@ package fetch
 import (
 	"compress/flate"
 	"compress/gzip"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"hash/adler32"
@@ -12,8 +13,7 @@ import (
 	urllib "net/url"
 	"path"
 	"time"
-
-	"github.com/midbel/try"
+	// "github.com/midbel/try"
 )
 
 var DefaultClient Client
@@ -76,12 +76,6 @@ func WithConfig(cfg *tls.Config) Option {
 	}
 }
 
-func WithRetry(attempt int) Option {
-	return func(c *Client) {
-		c.retry = attempt
-	}
-}
-
 func WithFileCache(dir string, size int, ttl time.Duration) Option {
 	return func(c *Client) {
 		c.Cache = FileCache(dir, size, ttl)
@@ -97,6 +91,12 @@ func WithBoltCache(ttl time.Duration) Option {
 	}
 }
 
+// func WithRetry(attempt int) Option {
+// 	return func(c *Client) {
+// 		c.retry = attempt
+// 	}
+// }
+
 type HookFunc func(http.Header) error
 
 type Client struct {
@@ -109,7 +109,7 @@ type Client struct {
 	addDefault bool
 	user       string
 	pass       string
-	retry      int
+	// retry      int
 
 	Cache
 }
@@ -131,7 +131,9 @@ func NewClient(options ...Option) Client {
 			DialContext: (&net.Dialer{
 				Timeout: 2500 * time.Millisecond,
 			}).DialContext,
-			TLSHandshakeTimeout: 2500 * time.Millisecond,
+			TLSHandshakeTimeout:   2500 * time.Millisecond,
+			ResponseHeaderTimeout: 10000 * time.Millisecond,
+			IdleConnTimeout:       5000 * time.Millisecond,
 		},
 	}
 
@@ -247,7 +249,10 @@ func (c *Client) Head(url string) (http.Header, error) {
 }
 
 func (c *Client) doDelete(url string, do DoFunc) error {
-	res, err := c.execute(http.MethodDelete, url, emptyBody())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	res, err := c.execute(ctx, http.MethodDelete, url, emptyBody())
 	if err != nil {
 		return err
 	}
@@ -262,7 +267,10 @@ func (c *Client) doGet(url string, do DoFunc) error {
 			return err
 		}
 	}
-	res, err := c.execute(http.MethodGet, url, emptyBody())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	res, err := c.execute(ctx, http.MethodGet, url, emptyBody())
 	if err != nil {
 		return err
 	}
@@ -288,7 +296,11 @@ func (c *Client) doQuery(meth, url, query string, in interface{}, do DoFunc) err
 	if err != nil {
 		return err
 	}
-	res, err := c.execute(meth, url, bd)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	res, err := c.execute(ctx, meth, url, bd)
 	if err != nil {
 		return err
 	}
@@ -303,7 +315,11 @@ func (c *Client) doJSON(meth, url string, in, out interface{}) error {
 	if err != nil {
 		return err
 	}
-	res, err := c.execute(meth, url, bd)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	res, err := c.execute(ctx, meth, url, bd)
 	if err != nil {
 		return err
 	}
@@ -319,7 +335,11 @@ func (c *Client) doXML(meth, url string, in, out interface{}) error {
 	if err != nil {
 		return err
 	}
-	res, err := c.execute(meth, url, bd)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	res, err := c.execute(ctx, meth, url, bd)
 	if err != nil {
 		return err
 	}
@@ -335,9 +355,13 @@ func (c *Client) doFollow(url string, rel RelType, do DoFunc) error {
 		list []string
 		seen = make(map[string]struct{})
 	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
 	list = append(list, url)
 	for len(list) > 0 {
-		res, err := c.execute(http.MethodGet, list[0], emptyBody())
+		res, err := c.execute(ctx, http.MethodGet, list[0], emptyBody())
 		if err != nil {
 			return err
 		}
@@ -357,24 +381,27 @@ func (c *Client) doFollow(url string, rel RelType, do DoFunc) error {
 	return nil
 }
 
-func (c *Client) execute(meth, url string, bd body) (*http.Response, error) {
-	req, err := c.prepare(meth, url, bd)
+func (c *Client) execute(ctx context.Context, meth, url string, bd body) (*http.Response, error) {
+	req, err := c.prepare(ctx, meth, url, bd)
 	if err != nil {
 		return nil, err
 	}
-	var res *http.Response
-	err = try.Try(c.retry, func(_ int) error {
-		r, err := c.client.Do(req)
-		if err == nil {
-			res = r
-		}
-		return err
-	})
-	return res, err
+	// if meth == http.MethodGet {
+	// 	var res *http.Response
+	// 	err = try.Try(c.retry, func(_ int) error {
+	// 		r, err := c.client.Do(req)
+	// 		if err == nil {
+	// 			res = r
+	// 		}
+	// 		return err
+	// 	})
+	// 	return res, err
+	// }
+	return c.client.Do(req)
 }
 
-func (c *Client) prepare(meth, url string, bd body) (*http.Request, error) {
-	req, err := http.NewRequest(meth, url, bd.Reader)
+func (c *Client) prepare(ctx context.Context, meth, url string, bd body) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, meth, url, bd.Reader)
 	if err != nil {
 		return nil, err
 	}
